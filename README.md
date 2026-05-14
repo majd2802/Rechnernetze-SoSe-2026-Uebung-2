@@ -335,3 +335,165 @@ Geographische Einordnung:
 - Zielorganisation: Universität Paris / `u-paris.fr`
 
 Ab Hop 15 erscheinen nur noch `Request timed out`. Trotzdem wurde vorher schon klar, dass die Route bis in das Netz von RENATER in Paris führt. Das Zielsystem oder spätere Router antworten wahrscheinlich nicht auf Traceroute-Anfragen. Das bedeutet nicht automatisch, dass der Server nicht erreichbar ist, sondern nur, dass keine Traceroute-Antwort zurückkommt.
+
+
+
+## Aufgabe 3: Nmap
+
+Für diese Aufgabe habe ich Nmap installiert und die Seite `scanme.nmap.org` mit TCP- und UDP-Scans untersucht.
+
+Zuerst habe ich überprüft, ob Nmap korrekt installiert ist:
+
+```powershell
+nmap --version
+```
+
+Ausgabe:
+
+```text
+Nmap version 7.99 ( https://nmap.org )
+Platform: i686-pc-windows-windows
+Compiled with: nmap-liblua-5.4.8 openssl-3.0.16 nmap-libssh2-1.11.1 nmap-libz-1.3.2 nmap-libpcre2-10.47 Npcap-1.87 nmap-libdnet-1.18.0 ipv6
+Compiled without:
+Available nsock engines: iocp poll select
+```
+
+### TCP SYN Scan
+
+Befehl:
+
+```powershell
+nmap -sS scanme.nmap.org
+```
+
+Ausgabe:
+
+```text
+Starting Nmap 7.99 ( https://nmap.org ) at 2026-05-14 17:23 +0200
+Nmap scan report for scanme.nmap.org (45.33.32.156)
+Host is up (0.18s latency).
+Other addresses for scanme.nmap.org (not scanned): 2600:3c01::f03c:91ff:fe18:bb2f
+Not shown: 996 closed tcp ports (reset)
+PORT      STATE SERVICE
+22/tcp    open  ssh
+80/tcp    open  http
+9929/tcp  open  nping-echo
+31337/tcp open  Elite
+
+Nmap done: 1 IP address (1 host up) scanned in 4.46 seconds
+```
+
+Der TCP SYN Scan war sehr schnell. Er dauerte nur `4.46 Sekunden`.
+
+Gefundene offene TCP-Ports:
+
+```text
+22/tcp    open  ssh
+80/tcp    open  http
+9929/tcp  open  nping-echo
+31337/tcp open  Elite
+```
+
+### UDP Scan
+
+Befehl:
+
+```powershell
+nmap -sU scanme.nmap.org
+```
+
+Ausgabe:
+
+```text
+Starting Nmap 7.99 ( https://nmap.org ) at 2026-05-14 17:23 +0200
+Nmap scan report for scanme.nmap.org (45.33.32.156)
+Host is up (0.18s latency).
+Other addresses for scanme.nmap.org (not scanned): 2600:3c01::f03c:91ff:fe18:bb2f
+Not shown: 998 closed udp ports (port-unreach)
+PORT    STATE         SERVICE
+68/udp  open|filtered dhcpc
+123/udp open          ntp
+
+Nmap done: 1 IP address (1 host up) scanned in 1011.43 seconds
+```
+
+Der UDP Scan war deutlich langsamer. Er dauerte `1011.43 Sekunden`, also ungefähr `16 Minuten und 51 Sekunden`.
+
+Gefundene UDP-Ports:
+
+```text
+68/udp  open|filtered dhcpc
+123/udp open          ntp
+```
+
+### Warum ist der TCP Scan wesentlich schneller?
+
+Der TCP SYN Scan ist schneller, weil TCP ein verbindungsorientiertes Protokoll ist. Bei einem SYN Scan sendet Nmap ein TCP-SYN-Paket an einen Port.
+
+Wenn der Port offen ist, antwortet der Zielrechner normalerweise mit `SYN/ACK`.
+
+Wenn der Port geschlossen ist, antwortet der Zielrechner normalerweise mit `RST`.
+
+Dadurch bekommt Nmap bei TCP meistens schnell eine eindeutige Antwort. In meiner Ausgabe sieht man auch:
+
+```text
+Not shown: 996 closed tcp ports (reset)
+```
+
+Das bedeutet, dass viele geschlossene TCP-Ports schnell durch TCP-Reset-Antworten erkannt wurden.
+
+### Warum ist der UDP Scan wesentlich langsamer?
+
+UDP ist verbindungslos. Es gibt keinen Verbindungsaufbau wie bei TCP und auch keine SYN/SYN-ACK/RST-Logik.
+
+Wenn Nmap ein UDP-Paket an einen offenen UDP-Port sendet, muss der Dienst nicht unbedingt antworten. Wenn ein UDP-Port geschlossen ist, kann eine ICMP-Fehlermeldung zurückkommen, zum Beispiel `port unreachable`.
+
+Wenn aber keine Antwort kommt, ist das für Nmap nicht eindeutig. Der Port könnte offen sein, gefiltert sein oder das Paket bzw. die Antwort könnte verloren gegangen sein. Deshalb muss Nmap bei UDP länger warten und teilweise erneut versuchen.
+
+Das sieht man auch an diesem Ergebnis:
+
+```text
+68/udp open|filtered dhcpc
+```
+
+`open|filtered` bedeutet, dass Nmap nicht sicher unterscheiden konnte, ob der Port offen oder gefiltert ist.
+
+Dadurch entstehen beim UDP Scan viele Wartezeiten und Timeouts. Deshalb dauerte der UDP Scan in meinem Test `1011.43 Sekunden`, während der TCP SYN Scan nur `4.46 Sekunden` dauerte.
+
+### Möglichkeiten, den Scan schneller durchzuführen
+
+Man kann den Scan schneller machen, indem man weniger Ports scannt oder aggressivere Timing-Optionen verwendet.
+
+Beispiele:
+
+```powershell
+nmap -sU -F scanme.nmap.org
+```
+
+Dieser Befehl verwendet den Fast-Scan-Modus und prüft weniger Ports.
+
+```powershell
+nmap -sU --top-ports 20 scanme.nmap.org
+```
+
+Dieser Befehl prüft nur die 20 häufigsten UDP-Ports.
+
+```powershell
+nmap -sU -p 53,67,68,123,161 scanme.nmap.org
+```
+
+Dieser Befehl prüft nur ausgewählte UDP-Ports.
+
+```powershell
+nmap -sU -T4 scanme.nmap.org
+```
+
+Dieser Befehl verwendet ein schnelleres Timing.
+
+```powershell
+nmap -sU -n scanme.nmap.org
+```
+
+Dieser Befehl deaktiviert DNS-Auflösung und kann dadurch Zeit sparen.
+
+Man muss dabei beachten, dass schnellere Scans unvollständiger oder ungenauer sein können. Wenn man weniger Ports prüft oder kürzere Wartezeiten verwendet, kann man offene Ports übersehen.
