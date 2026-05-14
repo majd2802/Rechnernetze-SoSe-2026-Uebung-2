@@ -497,3 +497,85 @@ nmap -sU -n scanme.nmap.org
 Dieser Befehl deaktiviert DNS-Auflösung und kann dadurch Zeit sparen.
 
 Man muss dabei beachten, dass schnellere Scans unvollständiger oder ungenauer sein können. Wenn man weniger Ports prüft oder kürzere Wartezeiten verwendet, kann man offene Ports übersehen.
+
+## Aufgabe 4: Programmieren
+
+### Idee
+
+Der ursprüngliche Token Ring funktioniert nur, solange alle Knoten im Ring aktiv bleiben. Wenn ein Knoten ausfällt, kann das Token an diesen Knoten gesendet werden und danach verschwindet es. Dann kommt das Token bei den anderen Knoten nicht mehr an und der Ring bleibt stehen.
+
+Damit der Ring auch beim Ausfall eines Knotens weiter funktionieren kann, muss ein Knoten erkennen können, dass das Token nicht mehr zurückkommt. Danach muss der ausgefallene Knoten aus der Ringliste entfernt werden. Anschließend kann das Token an den nächsten noch aktiven Knoten weitergegeben werden.
+
+### Problem bei UDP
+
+Das Programm verwendet UDP. UDP ist verbindungslos. Deshalb bedeutet ein erfolgreicher `send`-Aufruf nicht, dass der Empfänger wirklich aktiv ist oder das Paket erhalten hat.
+
+Deshalb reicht es nicht aus, nur beim Senden auf eine Exception zu warten. Ein UDP-Paket kann ohne Fehler gesendet werden, obwohl der Zielknoten nicht mehr läuft.
+
+### Umsetzung
+
+Für die Absicherung habe ich folgende Idee umgesetzt:
+
+1. Nach dem Senden des Tokens wird gespeichert, welches Token zuletzt gesendet wurde.
+2. Außerdem wird gespeichert, an welchen Knoten das Token gesendet wurde.
+3. Danach wird ein Timeout auf dem Socket gesetzt.
+4. Wenn innerhalb der erwarteten Zeit kein Token zurückkommt, wird angenommen, dass der nächste Knoten ausgefallen ist.
+5. Dieser Knoten wird mit `removeEndpoint(...)` aus der Ringliste entfernt.
+6. Danach wird das Token an den nächsten verbleibenden Knoten weitergeleitet.
+
+In `Token.java` wurde dafür eine Methode verwendet, die einen Endpoint aus der Queue entfernt:
+
+```java
+public boolean removeEndpoint(Endpoint endpoint) {
+    return ring.remove(endpoint);
+}
+```
+
+In `TokenRing.java` wird nach dem Senden des Tokens ein Timeout gesetzt:
+
+```java
+socket.setSoTimeout(timeoutFor(rc));
+```
+
+Wenn kein Token rechtzeitig zurückkommt, wird eine `SocketTimeoutException` ausgelöst. Dann wird der zuletzt verwendete Empfänger als ausgefallen betrachtet:
+
+```java
+catch (SocketTimeoutException e) {
+    if (lastToken == null || lastNext == null) {
+        continue;
+    }
+
+    System.out.printf(
+            "No token returned in time. Assuming node (%s, %d) failed.%n",
+            lastNext.ip(),
+            lastNext.port()
+    );
+
+    boolean removed = lastToken.removeEndpoint(lastNext);
+
+    // Danach wird der Ring ohne den ausgefallenen Knoten fortgesetzt.
+}
+```
+
+Wenn nach dem Entfernen noch mehrere Knoten übrig sind, wird das Token an den nächsten Knoten weitergeleitet:
+
+```java
+Token.Endpoint next = sendToNext(socket, lastToken);
+
+if (next != null) {
+    lastNext = next;
+    socket.setSoTimeout(timeoutFor(lastToken));
+}
+```
+
+### Ergebnis
+
+Durch diese Änderung bleibt der Token Ring nicht dauerhaft stehen, wenn ein Knoten ausfällt. Stattdessen wird nach einem Timeout angenommen, dass der zuletzt angesprochene Knoten nicht mehr erreichbar ist. Dieser Knoten wird aus der Ringliste entfernt und das Token wird an den nächsten Knoten weitergegeben.
+
+Dadurch kann der Ring mit den verbleibenden Knoten weiterlaufen.
+
+### Einschränkungen
+
+Diese Lösung ist eine einfache Absicherung. Sie erkennt Ausfälle über Timeouts. Das bedeutet, dass ein Knoten auch dann fälschlicherweise als ausgefallen erkannt werden könnte, wenn das Netzwerk nur sehr langsam ist oder ein UDP-Paket verloren geht.
+
+Eine noch bessere Lösung wäre ein eigenes ACK- oder Heartbeat-System. Dann würde ein Knoten nach dem Empfang des Tokens eine Bestätigung zurückschicken. Wenn diese Bestätigung ausbleibt, könnte der Sender den Knoten gezielter als ausgefallen betrachten.
